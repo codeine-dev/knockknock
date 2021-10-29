@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Sign In :: KnockKnock</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.3/css/bulma.min.css">
+    <script>
+        function knockKnock(evt) {
+            console.log("knockKnock:", this, evt)
+
+            if (evt.type === "Success") {
+                window.location = evt.redirect
+                return;
+            }
+
+            if (evt.type === "Challenge" && evt.factor === "username") {
+                let usernameInput = document.getElementById("username")
+                let value = usernameInput?.value;
+                evt.callback(value)
+            } else if (evt.type === "Challenge" && evt.factor === "password") {
+                let passwordInput = document.getElementById("password")
+                let value = passwordInput?.value;
+                evt.callback(value)
+            }
+        }
+    </script>
+</head>
+
+<body>
+    <section class="hero is-fullheight" style="background-color: #999;">
+        <div class="hero-body">
+            <div class="container">
+                <div class="columns is-centered">
+                    <div class="column is-5-tablet is-4-desktop is-3-widescreen">
+                        <form class="box">
+                            <div class="py-5 container has-text-centered">
+                                <h1 class="title">Sign In</h1>
+                                <h2 class="subtitle"></h2>
+                            </div>
+                            <div class="field">
+                                <div class="control">
+                                    <input id="username" name="username" type="text" placeholder="Email" class="input">
+                                </div>
+                            </div>
+                            <div class="field">
+                                <div class="control">
+                                    <input id="password" name="password" type="password" placeholder="Password"
+                                        class="input">
+                                </div>
+                            </div>
+                            <div class="field">
+                                <div class="buttons is-right">
+                                    <script src="http://127.0.0.1:8000/assets/knock-knock.js"
+                                        kk-class="button is-primary" kk-delegate="knockKnock"></script>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+</body>
+
+</html>
