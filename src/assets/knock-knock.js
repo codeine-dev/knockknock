@@ -60,8 +60,12 @@ class SignInManager {
         evt.preventDefault();
         if (this.formTag != null) {
             const body = new FormData(this.formTag);
-            this.doChallenge(body).then(() => {
-                console.log("Done!");
+            this.doChallenge(body).then(resp => {
+                console.log("Done:", resp);
+                if (resp && resp.type === "Success") {
+                    window.location = resp.redirect;
+                    return;
+                }
             });
         }
         return false;
@@ -72,11 +76,11 @@ class SignInManager {
             body,
         });
         return response.json()
-            .then(resp => {
-            console.log("Response:", resp);
+            .then(redirect => {
+            console.log("Response:", redirect);
             return {
                 type: "Success",
-                redirect: "https://www.google.com"
+                redirect,
             };
         })
             .catch(() => {

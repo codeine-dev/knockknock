@@ -34,5 +34,5 @@ pub type StateStoreResult<T> = std::result::Result<T, self::StateStoreError>;
 pub trait StateStore {
     fn build(&self) -> IStateStore;
     async fn get_state(&self, key: &str) -> StateStoreResult<String>;
-    async fn set_state(&self, value: &str) -> StateStoreResult<String>;
+    async fn set_state(&self, key: Option<&str>, value: &str) -> StateStoreResult<String>;
 }

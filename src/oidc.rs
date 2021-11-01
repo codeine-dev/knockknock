@@ -1,8 +1,6 @@
+use rand::Rng;
 use rocket::{
-    form::Lenient,
     http::{ContentType, Status},
-    outcome::try_outcome,
-    request::{FromRequest, Outcome},
     response::Responder,
     serde::{Deserialize, Serialize},
     Request, Response,
@@ -14,14 +12,14 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Debug, Clone)]
 pub enum ResponseType {
     Code,
     Token,
     IdToken,
 }
 
-#[derive(Debug, Serialize, Default)]
+#[derive(Debug, Serialize, Deserialize, Default)]
 pub struct ReservedClaims {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub iss: Option<String>,
@@ -39,10 +37,15 @@ pub struct ReservedClaims {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub jti: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nonce: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct Grant {
+    pub scope: Option<String>,
+
     #[serde(flatten)]
     pub reserved: ReservedClaims,
 
@@ -57,6 +60,8 @@ pub struct GrantBuilder {
     not_before: Option<u64>,
     not_after: Option<u64>,
     claims: HashMap<String, serde_json::Value>,
+    scope: Option<String>,
+    nonce: Option<String>,
 }
 
 impl GrantBuilder {
@@ -75,7 +80,34 @@ impl GrantBuilder {
             not_before: Some(Self::now()),
             subject: Some(sub.to_owned()),
             claims: HashMap::new(),
+            scope: None,
+            nonce: None,
         }
+    }
+
+    pub fn with_nonce(mut self, nonce: &str) -> Self {
+        self.nonce = Some(nonce.to_owned());
+        self
+    }
+
+    pub fn expires_in_secs(mut self, minutes: u64) -> Self {
+        self.not_after = self.not_before.map(|nbf| nbf + (minutes * 60));
+        self
+    }
+
+    pub fn with_audience(mut self, audience: &str) -> Self {
+        self.audience = Some(audience.to_owned());
+        self
+    }
+
+    pub fn with_issuer(mut self, issuer: &str) -> Self {
+        self.issuer = Some(issuer.to_owned());
+        self
+    }
+
+    pub fn with_scope(mut self, scope: &str) -> Self {
+        self.scope = Some(scope.to_owned());
+        self
     }
 
     pub fn with_claim<V>(mut self, claim: &str, value: V) -> Self
@@ -85,11 +117,18 @@ impl GrantBuilder {
         self.claims.insert(claim.to_owned(), value.into());
         self
     }
+    pub fn build_id_token(self, client_id: &str, issuer: &str) -> Result<Grant, ()> {
+        self.with_audience(client_id).with_issuer(issuer).build()
+    }
 
-    pub fn build(self) -> Result<Grant, ()> {
+    pub fn build(mut self) -> Result<Grant, ()> {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("SystemTime is set befoe the epoch");
+
+        if self.not_after.is_none() {
+            self = self.expires_in_secs(10);
+        }
 
         let reserved = ReservedClaims {
             iss: self.issuer,
@@ -99,9 +138,11 @@ impl GrantBuilder {
             nbf: self.not_before,
             iat: Some(now.as_secs()),
             jti: None,
+            nonce: None,
         };
 
         Ok(Grant {
+            scope: self.scope,
             reserved,
             claims: json!(self.claims),
         })
@@ -111,6 +152,7 @@ impl GrantBuilder {
 #[derive(Deserialize, Debug)]
 pub enum TokenRequest {
     AuthorizationCode {
+        code: String,
         code_verifier: Option<String>,
         redirect_uri: Option<String>,
     },
@@ -135,7 +177,12 @@ impl TryFrom<HashMap<&str, &str>> for TokenRequest {
     fn try_from(map: HashMap<&str, &str>) -> Result<Self, Self::Error> {
         if let Some(&grant_type) = map.get("grant_type") {
             return match grant_type {
-                "code" => Ok(TokenRequest::AuthorizationCode {
+                "authorization_code" => Ok(TokenRequest::AuthorizationCode {
+                    code: map
+                        .get("code")
+                        .map(|&s| s.to_owned())
+                        .or_else(|| Some("".to_owned()))
+                        .unwrap(),
                     code_verifier: map.get("code_verifier").map(|&s| s.to_owned()),
                     redirect_uri: map.get("redirect_uri").map(|&s| s.to_owned()),
                 }),
@@ -153,6 +200,7 @@ pub enum TokenRequestError {
     MissingGrantType,
     InvalidGrantType(String),
     InvalidRedirectUri(String),
+    InvalidCode(String),
 }
 
 impl TokenRequestError {
@@ -173,6 +221,9 @@ impl<'r> Responder<'r, 'static> for TokenRequestError {
             Self::InvalidRedirectUri(redirect_uri) => {
                 format!("Invalid redirect_uri: {}", redirect_uri)
             }
+            Self::InvalidCode(code) => {
+                format!("Invalid code: {}", code)
+            }
             _ => format!("Error: {:?}", self),
         };
 
@@ -181,6 +232,24 @@ impl<'r> Responder<'r, 'static> for TokenRequestError {
         Response::build_from(text.respond_to(req)?)
             .status(status)
             .header(ContentType::Plain)
+            .ok()
+    }
+}
+
+#[derive(Debug, Serialize, Default)]
+pub struct TokenRequestResponse {
+    pub access_token: Option<String>,
+    pub refresh_token: Option<String>,
+    pub id_token: Option<String>,
+}
+
+impl<'r> Responder<'r, 'static> for TokenRequestResponse {
+    fn respond_to(self, req: &'r Request<'_>) -> rocket::response::Result<'static> {
+        let text = serde_json::to_string(&self).unwrap();
+
+        Response::build_from(text.respond_to(req)?)
+            .status(Status::Ok)
+            .header(ContentType::JSON)
             .ok()
     }
 }
