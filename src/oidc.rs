@@ -1,4 +1,3 @@
-use rand::Rng;
 use rocket::{
     http::{ContentType, Status},
     response::Responder,

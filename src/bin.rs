@@ -4,9 +4,8 @@ use std::{
 };
 
 use async_trait::async_trait;
-use libknockknock::{AuthError, AuthRequest, GrantResponses, SealedGrantResponses, UsernamePasswordForm, prelude::*};
+use libknockknock::{prelude::*, AuthRequest, SealedGrantResponses, UsernamePasswordForm};
 use log::{debug, error};
-use rocket::request;
 
 #[derive(Default)]
 struct InMemoryStateStore {
@@ -105,7 +104,7 @@ impl Providers for MyProviders {
     async fn validate_authorization(
         &self,
         _client_id: &str,
-        _response_type: &[libknockknock::oidc::ResponseType],
+        _response_type: &[ResponseType],
         _scope: &[&str],
         _redirect_url: &str,
         _state: Option<&str>,

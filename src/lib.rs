@@ -2,8 +2,8 @@
 extern crate rocket;
 mod assets;
 mod fern;
-pub mod jwt;
-pub mod oidc;
+mod jwt;
+mod oidc;
 pub mod prelude;
 mod state;
 
@@ -43,7 +43,7 @@ pub enum LoginState {
 }
 
 #[derive(Responder, Debug)]
-pub enum AuthError<T> {
+enum AuthError<T> {
     #[response(status = 401)]
     Unauthorized(T),
     #[response(status = 400)]
@@ -260,11 +260,6 @@ pub trait Providers {
 
 type IProviders = Box<dyn Providers + Send + Sync>;
 
-#[get("/")]
-async fn index(config: &State<Configuration>, req: AuthRequest) -> String {
-    "".to_owned()
-}
-
 #[get("/connect/authorize?<client_id>&<response_type>&<scope>&<redirect_uri>&<state>&<nonce>")]
 async fn authorize(
     client_id: &str,
@@ -329,7 +324,7 @@ async fn authorize(
 async fn token(
     config: &State<Configuration>,
     req: Form<HashMap<&str, &str>>,
-    auth: BasicAuthentication,
+    _auth: BasicAuthentication,
 ) -> Result<oidc::TokenRequestResponse, TokenRequestError> {
     let token_req: TokenRequest = req.into_inner().try_into()?;
     debug!("Token: {:?}", token_req);
@@ -337,8 +332,8 @@ async fn token(
     let grants = match token_req {
         TokenRequest::AuthorizationCode {
             code,
-            code_verifier,
-            redirect_uri,
+            code_verifier: _,
+            redirect_uri: _,
         } => {
             let grants = config
                 .providers
@@ -513,14 +508,7 @@ pub async fn start(config: Configuration) -> Result<(), ()> {
         .manage(config)
         .mount(
             "/",
-            routes![
-                index,
-                authorize,
-                token,
-                sign_in,
-                sign_in_post,
-                assets::assets
-            ],
+            routes![authorize, token, sign_in, sign_in_post, assets::assets],
         )
         .launch()
         .await

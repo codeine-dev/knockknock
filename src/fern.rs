@@ -1,5 +1,3 @@
-use log::{debug, error, info, trace, warn};
-
 pub fn setup_logger(level: log::LevelFilter) -> Result<(), fern::InitError> {
     fern::Dispatch::new()
         .format(|out, message, record| {
