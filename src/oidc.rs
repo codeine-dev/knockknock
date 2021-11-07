@@ -1,3 +1,4 @@
+use rand::{distributions::Alphanumeric, Rng};
 use rocket::{
     http::{ContentType, Status},
     response::Responder,
@@ -8,6 +9,7 @@ use serde_json::json;
 use std::{
     collections::HashMap,
     convert::TryFrom,
+    iter,
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -27,12 +29,9 @@ pub struct ReservedClaims {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub aud: Option<String>,
 
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub exp: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub nbf: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub iat: Option<u64>,
+    pub exp: u64,
+    pub nbf: u64,
+    pub iat: u64,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub jti: Option<String>,
@@ -52,6 +51,18 @@ pub struct Grant {
     pub claims: serde_json::Value,
 }
 
+impl Grant {
+    pub fn is_active(&self) -> bool {
+        let now = GrantBuilder::now();
+
+        debug!(
+            "Token validity: {}-{}-{}",
+            self.reserved.nbf, now, self.reserved.exp
+        );
+        self.reserved.nbf <= now && self.reserved.exp > now
+    }
+}
+
 pub struct GrantBuilder {
     issuer: Option<String>,
     subject: Option<String>,
@@ -64,7 +75,7 @@ pub struct GrantBuilder {
 }
 
 impl GrantBuilder {
-    fn now() -> u64 {
+    pub fn now() -> u64 {
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("SystemTime is set befoe the epoch")
@@ -89,8 +100,8 @@ impl GrantBuilder {
         self
     }
 
-    pub fn expires_in_secs(mut self, minutes: u64) -> Self {
-        self.not_after = self.not_before.map(|nbf| nbf + (minutes * 60));
+    pub fn expires_in_secs(mut self, secs: u64) -> Self {
+        self.not_after = self.not_before.map(|nbf| nbf + secs);
         self
     }
 
@@ -129,13 +140,17 @@ impl GrantBuilder {
             self = self.expires_in_secs(10);
         }
 
+        if self.not_before.is_none() {
+            self.not_before = Some(now.as_secs());
+        }
+
         let reserved = ReservedClaims {
             iss: self.issuer,
             sub: self.subject,
             aud: self.audience,
-            exp: self.not_after,
-            nbf: self.not_before,
-            iat: Some(now.as_secs()),
+            exp: self.not_after.unwrap(),
+            nbf: self.not_before.unwrap(),
+            iat: now.as_secs(),
             jti: None,
             nonce: None,
         };
@@ -250,5 +265,82 @@ impl<'r> Responder<'r, 'static> for TokenRequestResponse {
             .status(Status::Ok)
             .header(ContentType::JSON)
             .ok()
+    }
+}
+
+#[derive(Debug)]
+pub enum TokenIntrospectError {
+    Unauthorized,
+    MissingToken,
+}
+
+impl TokenIntrospectError {
+    pub fn status_code(&self) -> Status {
+        match self {
+            Self::Unauthorized => Status::Unauthorized,
+            _ => Status::BadRequest,
+        }
+    }
+}
+
+// If the response contains no borrowed data.
+impl<'r> Responder<'r, 'static> for TokenIntrospectError {
+    fn respond_to(self, req: &'r Request<'_>) -> rocket::response::Result<'static> {
+        let text = match &self {
+            Self::Unauthorized => "Unauthorized".to_owned(),
+            _ => format!("Error: {:?}", self),
+        };
+
+        let status = self.status_code();
+
+        Response::build_from(text.respond_to(req)?)
+            .status(status)
+            .header(ContentType::Plain)
+            .ok()
+    }
+}
+
+#[derive(Deserialize, Debug)]
+pub enum TokenIntrospectRequest {
+    AccessToken { token: String },
+}
+
+impl TryFrom<HashMap<&str, &str>> for TokenIntrospectRequest {
+    type Error = TokenIntrospectError;
+
+    fn try_from(map: HashMap<&str, &str>) -> Result<Self, Self::Error> {
+        match map.get("token") {
+            Some(&token) => Ok(Self::AccessToken {
+                token: String::from(token),
+            }),
+            _ => Err(TokenIntrospectError::MissingToken),
+        }
+    }
+}
+
+pub fn generate_authorization_code() -> String {
+    let mut rng = rand::thread_rng();
+    let chars: String = iter::repeat(())
+        .map(|()| rng.sample(Alphanumeric))
+        .map(char::from)
+        .take(20)
+        .collect();
+
+    chars
+}
+
+#[derive(Serialize)]
+pub struct IntrospectResult {
+    pub active: bool,
+    #[serde(flatten, skip_serializing_if = "Option::is_none")]
+    pub grant: Option<Grant>,
+}
+
+impl Default for IntrospectResult {
+    fn default() -> Self {
+        Self {
+            active: false,
+            grant: None,
+        }
     }
 }

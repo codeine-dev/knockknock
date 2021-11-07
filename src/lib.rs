@@ -1,17 +1,17 @@
 #[macro_use]
-extern crate rocket;
+pub extern crate rocket;
 mod assets;
-mod fern;
 mod jwt;
 mod oidc;
 pub mod prelude;
-mod state;
 
 use std::collections::HashMap;
 use std::convert::TryInto;
 
-use oidc::{ResponseType, TokenRequest, TokenRequestResponse};
-use prelude::{Grant, IStateStore, TokenRequestError};
+use oidc::{
+    ResponseType, TokenIntrospectError, TokenIntrospectRequest, TokenRequest, TokenRequestResponse,
+};
+use prelude::{Grant, IntrospectResult, TokenRequestError};
 use rocket::{
     form::Form,
     http::{ContentType, Cookie, CookieJar, Status},
@@ -78,14 +78,22 @@ impl<'r> Responder<'r, 'static> for ValidAuthResult {
                 access_token,
                 state,
                 code,
-            } => ValidAuthResult::SimpleResult(format!(
-                "{}#access_token={}&id_token={}&state={}&code={}",
-                redirect_uri,
-                access_token.or(Some("".to_owned())).unwrap(),
-                id_token.or(Some("".to_owned())).unwrap(),
-                state.or(Some("".to_owned())).unwrap(),
-                code.or(Some("".to_owned())).unwrap(),
-            )),
+            } => {
+                let parts: Vec<String> = [
+                    ("access_token", access_token),
+                    ("id_token", id_token),
+                    ("state", state),
+                    ("code", code),
+                ]
+                .iter()
+                .filter_map(|s| match s {
+                    (label, Some(value)) => Some(format!("{}={}", label, value)),
+                    _ => None,
+                })
+                .collect();
+                let query = parts.join("&");
+                ValidAuthResult::SimpleResult(format!("{}#{}", redirect_uri, query))
+            }
             _ => self,
         };
 
@@ -107,10 +115,41 @@ pub struct GrantResponses {
 impl GrantResponses {
     pub fn to_sealed(&self, signer: &Box<dyn jwt::JwtSign + Sync + Send>) -> SealedGrantResponses {
         SealedGrantResponses {
-            access_token: self.access_token.as_ref().map(|t| signer.sign(json!(t))),
-            id_token: self.id_token.as_ref().map(|t| signer.sign(json!(t))),
-            ..Default::default()
+            access_token: self.access_token.as_ref().map(|t| {
+                debug!("Sealing grant: {:?}", t);
+                signer.sign(json!(t))
+            }),
+            id_token: self.id_token.as_ref().map(|t| {
+                debug!("Sealing grant: {:?}", t);
+                signer.sign(json!(t))
+            }),
         }
+    }
+
+    pub fn from_sealed(
+        sealed: &SealedGrantResponses,
+        signer: &Box<dyn jwt::JwtSign + Sync + Send>,
+    ) -> Result<Self, ()> {
+        let access_token: Option<Grant> = sealed.access_token.as_ref().map(|sealed| {
+            signer
+                .decode(&sealed)
+                .ok()
+                .map(|v| serde_json::from_value(v).ok().unwrap())
+                .unwrap()
+        });
+
+        let id_token: Option<Grant> = sealed.id_token.as_ref().map(|sealed| {
+            signer
+                .decode(&sealed)
+                .ok()
+                .map(|v| serde_json::from_value(v).ok().unwrap())
+                .unwrap()
+        });
+
+        Ok(Self {
+            access_token,
+            id_token,
+        })
     }
 }
 
@@ -130,8 +169,8 @@ impl<'r> FromRequest<'r> for BasicAuthentication {
     type Error = ();
 
     async fn from_request(req: &'r Request<'_>) -> Outcome<Self, Self::Error> {
-        let config: &State<Configuration> =
-            try_outcome!(req.guard::<&State<Configuration>>().await);
+        let config: &State<ProviderConfiguration> =
+            try_outcome!(req.guard::<&State<ProviderConfiguration>>().await);
 
         match req.headers().get_one("Authorization") {
             Some(auth) => {
@@ -169,7 +208,7 @@ impl<'r> FromRequest<'r> for BasicAuthentication {
                     .unwrap();
 
                 let is_valid = config
-                    .providers
+                    .adaptor
                     .validate_client(&username, &password)
                     .await
                     .map(|_| true)
@@ -186,10 +225,9 @@ impl<'r> FromRequest<'r> for BasicAuthentication {
     }
 }
 
-pub struct Configuration {
+pub struct ProviderConfiguration {
     pub jwt_builder: jwt::JwtBuilder,
-    pub providers: IProviders,
-    pub state_store: IStateStore,
+    pub adaptor: OidcAdaptor,
 }
 
 pub struct AuthRequest {
@@ -230,8 +268,8 @@ impl<'r> FromRequest<'r> for AuthRequest {
     }
 }
 
-#[async_trait]
-pub trait Providers {
+#[rocket::async_trait]
+pub trait OidcAdaptorImpl {
     async fn issue_grant(
         &self,
         sub: &str,
@@ -258,7 +296,7 @@ pub trait Providers {
     async fn retrieve_grant(&self, code: &str) -> ProviderResult<SealedGrantResponses>;
 }
 
-type IProviders = Box<dyn Providers + Send + Sync>;
+type OidcAdaptor = Box<dyn OidcAdaptorImpl + Send + Sync>;
 
 #[get("/connect/authorize?<client_id>&<response_type>&<scope>&<redirect_uri>&<state>&<nonce>")]
 async fn authorize(
@@ -268,7 +306,7 @@ async fn authorize(
     redirect_uri: &str,
     state: Option<&str>,
     nonce: Option<&str>,
-    config: &State<Configuration>,
+    config: &State<ProviderConfiguration>,
     cookies: &CookieJar<'_>,
 ) -> Redirect {
     let response_types: Vec<ResponseType> = response_type
@@ -285,7 +323,7 @@ async fn authorize(
 
     // validate the client is making an acceptable request
     if let Err(reason) = config
-        .providers
+        .adaptor
         .validate_authorization(
             client_id,
             response_types.as_slice(),
@@ -322,7 +360,7 @@ async fn authorize(
 
 #[post("/connect/token", data = "<req>")]
 async fn token(
-    config: &State<Configuration>,
+    config: &State<ProviderConfiguration>,
     req: Form<HashMap<&str, &str>>,
     _auth: BasicAuthentication,
 ) -> Result<oidc::TokenRequestResponse, TokenRequestError> {
@@ -336,7 +374,7 @@ async fn token(
             redirect_uri: _,
         } => {
             let grants = config
-                .providers
+                .adaptor
                 .retrieve_grant(&code)
                 .await
                 .map_err(|_| TokenRequestError::InvalidCode(code))?;
@@ -352,6 +390,46 @@ async fn token(
             refresh_token: None,
         }),
         None => Err(TokenRequestError::Unauthorized),
+    }
+}
+
+#[post("/connect/introspect", data = "<req>")]
+async fn introspect(
+    config: &State<ProviderConfiguration>,
+    req: Form<HashMap<&str, &str>>,
+    _auth: BasicAuthentication,
+) -> Result<serde_json::Value, TokenIntrospectError> {
+    let token_req: TokenIntrospectRequest = req.into_inner().try_into()?;
+    debug!("Token: {:?}", token_req);
+
+    let token = match token_req {
+        TokenIntrospectRequest::AccessToken { token } => {
+            let grants = config
+                .adaptor
+                .retrieve_grant(&token)
+                .await
+                .map_err(|_| TokenIntrospectError::MissingToken)?;
+
+            let tokens = GrantResponses::from_sealed(&grants, &config.jwt_builder)
+                .map_err(|_| TokenIntrospectError::Unauthorized)?;
+
+            match tokens.access_token {
+                Some(grant) => match grant.is_active() {
+                    true => Some(IntrospectResult {
+                        active: true,
+                        grant: Some(grant),
+                    }),
+                    false => Some(IntrospectResult::default()),
+                },
+                None => None,
+            }
+        }
+        _ => None,
+    };
+
+    match token {
+        Some(token) => Ok(json!(token)),
+        None => Err(TokenIntrospectError::Unauthorized),
     }
 }
 
@@ -374,7 +452,7 @@ fn get_sign_in_bundle(cookies: &CookieJar<'_>) -> Result<SignInBundle, AuthError
 
 #[get("/sign-in")]
 async fn sign_in(
-    _config: &State<Configuration>,
+    _config: &State<ProviderConfiguration>,
     cookies: &CookieJar<'_>,
 ) -> AuthResult<serde_json::Value> {
     let bundle = get_sign_in_bundle(cookies)?;
@@ -383,7 +461,7 @@ async fn sign_in(
 
 #[post("/sign-in", data = "<login>")]
 async fn sign_in_post(
-    config: &State<Configuration>,
+    config: &State<ProviderConfiguration>,
     cookies: &CookieJar<'_>,
     login: Form<UsernamePasswordForm>,
     mut req: AuthRequest,
@@ -405,7 +483,7 @@ async fn sign_in_post(
     let nonce = bundle.get("nonce").map(|s| s.to_owned());
 
     let sub = config
-        .providers
+        .adaptor
         .validate_login(UsernamePasswordForm {
             username: login.username.to_owned(),
             password: login.password.to_owned(),
@@ -441,6 +519,16 @@ async fn sign_in_post(
         None => Vec::default(),
     };
 
+    // ensure we have either a token OR id_token response type requested
+    if !response_types
+        .iter()
+        .any(|rt| rt == &ResponseType::IdToken || rt == &ResponseType::Token)
+    {
+        return Err(AuthError::InvalidRequest(
+            "Must specify either token or id_token responses when authorizing".to_owned(),
+        ));
+    };
+
     let mut grants = GrantResponses::default();
     for response_type in response_types.clone() {
         debug!(
@@ -449,7 +537,7 @@ async fn sign_in_post(
         );
 
         let mut grant = config
-            .providers
+            .adaptor
             .issue_grant(&sub, scopes.as_slice(), response_type.clone(), &req)
             .await
             .map_err(|err| {
@@ -460,6 +548,8 @@ async fn sign_in_post(
         if nonce.is_some() {
             grant.reserved.nonce = Some(nonce.as_ref().unwrap().to_owned());
         }
+
+        debug!("Grant: {:?}", grant);
 
         match response_type {
             ResponseType::Token => {
@@ -472,18 +562,36 @@ async fn sign_in_post(
         }
     }
 
+    let mut auth_code: Option<String> = None;
+
+    let code = oidc::generate_authorization_code();
+    let sealed_grant = grants.to_sealed(&config.jwt_builder);
+    debug!("Sealed grants: {:?}", sealed_grant);
+
+    config
+        .adaptor
+        .store_grant(&sealed_grant, &code)
+        .await
+        .map_err(|_| AuthError::Unauthorized("Could not store the grant".to_owned()))?;
+
+    auth_code = Some(String::from(&code));
+
     if response_types.contains(&ResponseType::Code) {
-        let sealed_grant = grants.to_sealed(&config.jwt_builder);
-        config
-            .providers
-            .store_grant(&sealed_grant, "my-code")
-            .await
-            .map_err(|_| AuthError::Unauthorized("Could not store the grant".to_owned()))?;
+        return Ok(ValidAuthResult::TokenResult {
+            redirect_uri,
+            access_token: None,
+            id_token: None,
+            state,
+            code: auth_code,
+        });
     }
 
-    let access_token = grants
-        .access_token
-        .map(|grant| config.jwt_builder.sign(json!(grant)));
+    // let access_token = grants
+    //     .access_token
+    //     .map(|grant| config.jwt_builder.sign(json!(grant)));
+
+    let access_token = Some(String::from(&code));
+
     let id_token = grants
         .id_token
         .map(|grant| config.jwt_builder.sign(json!(grant)));
@@ -493,7 +601,7 @@ async fn sign_in_post(
         access_token,
         id_token,
         state,
-        code: Some("my-code".to_owned()),
+        code: None,
     })
 }
 
@@ -501,14 +609,19 @@ fn rocket() -> Rocket<Build> {
     rocket::build()
 }
 
-pub async fn start(config: Configuration) -> Result<(), ()> {
-    fern::setup_logger(log::LevelFilter::Debug).map_err(|_| ())?;
-
+pub async fn start(config: ProviderConfiguration) -> Result<(), ()> {
     rocket()
         .manage(config)
         .mount(
             "/",
-            routes![authorize, token, sign_in, sign_in_post, assets::assets],
+            routes![
+                authorize,
+                token,
+                introspect,
+                sign_in,
+                sign_in_post,
+                assets::assets
+            ],
         )
         .launch()
         .await

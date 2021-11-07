@@ -1,5 +1,5 @@
 use hmac::{Hmac, NewMac};
-use jwt::SignWithKey;
+use jwt::{SignWithKey, VerifyWithKey};
 use sha2::Sha256;
 
 pub type JwtBuilder = Box<dyn JwtSign + Send + Sync>;
@@ -18,6 +18,7 @@ impl JwtSharedSecret {
 
 pub trait JwtSign {
     fn sign(&self, claims: serde_json::Value) -> String;
+    fn decode(&self, token: &str) -> Result<serde_json::Value, ()>;
 }
 
 impl JwtSign for JwtSharedSecret {
@@ -25,5 +26,9 @@ impl JwtSign for JwtSharedSecret {
         claims
             .sign_with_key(&self.key)
             .expect("Error signing claims")
+    }
+
+    fn decode(&self, token: &str) -> Result<serde_json::Value, ()> {
+        token.verify_with_key(&self.key).map_err(|_| ())
     }
 }
