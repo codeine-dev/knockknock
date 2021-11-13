@@ -702,6 +702,7 @@ dependencies = [
  "base64",
  "chrono",
  "fern",
+ "futures",
  "hmac 0.11.0",
  "jwt",
  "log",

@@ -185,20 +185,20 @@ pub enum TokenRequest {
     },
 }
 
-impl TryFrom<HashMap<&str, &str>> for TokenRequest {
+impl TryFrom<HashMap<String, String>> for TokenRequest {
     type Error = TokenRequestError;
 
-    fn try_from(map: HashMap<&str, &str>) -> Result<Self, Self::Error> {
-        if let Some(&grant_type) = map.get("grant_type") {
-            return match grant_type {
+    fn try_from(map: HashMap<String, String>) -> Result<Self, Self::Error> {
+        if let Some(grant_type) = map.get("grant_type") {
+            return match grant_type.as_str() {
                 "authorization_code" => Ok(TokenRequest::AuthorizationCode {
                     code: map
                         .get("code")
-                        .map(|&s| s.to_owned())
+                        .map(|s| s.to_owned())
                         .or_else(|| Some("".to_owned()))
                         .unwrap(),
-                    code_verifier: map.get("code_verifier").map(|&s| s.to_owned()),
-                    redirect_uri: map.get("redirect_uri").map(|&s| s.to_owned()),
+                    code_verifier: map.get("code_verifier").map(|s| s.to_owned()),
+                    redirect_uri: map.get("redirect_uri").map(|s| s.to_owned()),
                 }),
                 _ => Err(TokenRequestError::InvalidGrantType(grant_type.to_owned())),
             };
@@ -268,55 +268,9 @@ impl<'r> Responder<'r, 'static> for TokenRequestResponse {
     }
 }
 
-#[derive(Debug)]
-pub enum TokenIntrospectError {
-    Unauthorized,
-    MissingToken,
-}
 
-impl TokenIntrospectError {
-    pub fn status_code(&self) -> Status {
-        match self {
-            Self::Unauthorized => Status::Unauthorized,
-            _ => Status::BadRequest,
-        }
-    }
-}
 
-// If the response contains no borrowed data.
-impl<'r> Responder<'r, 'static> for TokenIntrospectError {
-    fn respond_to(self, req: &'r Request<'_>) -> rocket::response::Result<'static> {
-        let text = match &self {
-            Self::Unauthorized => "Unauthorized".to_owned(),
-            _ => format!("Error: {:?}", self),
-        };
 
-        let status = self.status_code();
-
-        Response::build_from(text.respond_to(req)?)
-            .status(status)
-            .header(ContentType::Plain)
-            .ok()
-    }
-}
-
-#[derive(Deserialize, Debug)]
-pub enum TokenIntrospectRequest {
-    AccessToken { token: String },
-}
-
-impl TryFrom<HashMap<&str, &str>> for TokenIntrospectRequest {
-    type Error = TokenIntrospectError;
-
-    fn try_from(map: HashMap<&str, &str>) -> Result<Self, Self::Error> {
-        match map.get("token") {
-            Some(&token) => Ok(Self::AccessToken {
-                token: String::from(token),
-            }),
-            _ => Err(TokenIntrospectError::MissingToken),
-        }
-    }
-}
 
 pub fn generate_authorization_code() -> String {
     let mut rng = rand::thread_rng();
@@ -334,6 +288,32 @@ pub struct IntrospectResult {
     pub active: bool,
     #[serde(flatten, skip_serializing_if = "Option::is_none")]
     pub grant: Option<Grant>,
+}
+
+impl IntrospectResult {
+    pub fn filter_claims(mut self, claims: Vec<String>) -> Self {
+        let filtered_grant = self.grant.map(|grant| {
+            let mut grant = grant;
+            grant.claims.as_object_mut().map(|grant_claims| {
+                *grant_claims = grant_claims
+                    .iter()
+                    .filter_map(|obj| {
+                        if !claims.contains(obj.0) {
+                            return None;
+                        }
+
+                        Some((obj.0.to_owned(), obj.1.to_owned()))
+                    })
+                    .collect::<serde_json::Map<String, serde_json::Value>>();
+            });
+
+            grant
+        });
+
+        self.grant = filtered_grant;
+
+        self
+    }
 }
 
 impl Default for IntrospectResult {

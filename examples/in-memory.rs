@@ -3,7 +3,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use libknockknock::{prelude::*, AuthRequest, SealedGrantResponses, UsernamePasswordForm};
+use libknockknock::prelude::*;
 
 use log::{debug, error};
 
@@ -21,27 +21,42 @@ impl Default for InMemoryAdaptor {
 
 #[rocket::async_trait]
 impl OidcAdaptorImpl for InMemoryAdaptor {
+    async fn claims_for_scope(&self, scope: &str) -> Vec<String> {
+        match scope {
+            "email" => vec!["email"].iter().map(|&s| String::from(s)).collect(),
+            "roles" => vec!["Admin"].iter().map(|&s| String::from(s)).collect(),
+            _ => vec![],
+        }
+    }
+
+    async fn scopes_for_resource(&self, resource: &str) -> Vec<String> {
+        match resource {
+            "any" => vec!["email"].iter().map(|&s| String::from(s)).collect(),
+            _ => vec![],
+        }
+    }
+
     async fn issue_grant(
         &self,
         sub: &str,
         scopes: &[&str],
         response_type: ResponseType,
-        request: &AuthRequest,
+        request: &RequestHost,
+        bundle: &ClientAuthBundle,
     ) -> ProviderResult<Grant> {
         let builder = GrantBuilder::for_subject(sub);
 
         // all grants provide the Admin claim
         let grant = builder
             .with_claim("Admin", "")
+            .with_claim("email", "richbayliss@gmail.com")
             .with_scope(&scopes.join(" "))
             .expires_in_secs(10);
 
         match response_type {
             ResponseType::IdToken => {
-                let client_id = request.client_id.as_ref();
-                let client_id = client_id.expect("client_id is missing").to_owned();
-
-                let issuer = request.host.to_owned();
+                let client_id = bundle.client_id.to_owned();
+                let issuer = format!("{}://{}", request.scheme, request.host);
                 grant.build_id_token(&client_id, &issuer)
             }
             _ => grant.build(),
