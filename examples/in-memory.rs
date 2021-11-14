@@ -5,7 +5,8 @@ use std::{
 
 use libknockknock::prelude::*;
 
-use log::{debug, error};
+use log::debug;
+use rocket::{get, launch, routes, State};
 
 struct InMemoryAdaptor {
     grants: Arc<Mutex<HashMap<String, String>>>,
@@ -22,6 +23,7 @@ impl Default for InMemoryAdaptor {
 #[rocket::async_trait]
 impl OidcAdaptorImpl for InMemoryAdaptor {
     async fn claims_for_scope(&self, scope: &str) -> Vec<String> {
+        debug!("Claims for scope: {}", scope);
         match scope {
             "email" => vec!["email"].iter().map(|&s| String::from(s)).collect(),
             "roles" => vec!["Admin"].iter().map(|&s| String::from(s)).collect(),
@@ -30,6 +32,7 @@ impl OidcAdaptorImpl for InMemoryAdaptor {
     }
 
     async fn scopes_for_resource(&self, resource: &str) -> Vec<String> {
+        debug!("Scopes for resource: {}", resource);
         match resource {
             "any" => vec!["email"].iter().map(|&s| String::from(s)).collect(),
             _ => vec![],
@@ -44,6 +47,7 @@ impl OidcAdaptorImpl for InMemoryAdaptor {
         request: &RequestHost,
         bundle: &ClientAuthBundle,
     ) -> ProviderResult<Grant> {
+        debug!("Issue grant for sub: {}", sub);
         let builder = GrantBuilder::for_subject(sub);
 
         // all grants provide the Admin claim
@@ -64,6 +68,7 @@ impl OidcAdaptorImpl for InMemoryAdaptor {
     }
 
     async fn validate_login(&self, login: UsernamePasswordForm) -> ProviderResult<String> {
+        debug!("Validate login: {:?}", login);
         // only the admin is OK
         if login.username != "admin" || login.password != "password" {
             return Err(());
@@ -73,6 +78,7 @@ impl OidcAdaptorImpl for InMemoryAdaptor {
     }
 
     async fn validate_client(&self, client_id: &str, client_secret: &str) -> ProviderResult<()> {
+        debug!("Validate client: {} ({})", client_id, client_secret);
         if client_id != "any" || client_secret != "any" {
             return Err(());
         }
@@ -139,19 +145,25 @@ pub fn setup_logger(level: log::LevelFilter) -> Result<(), fern::InitError> {
     Ok(())
 }
 
-#[rocket::main]
-async fn main() {
+#[get("/")]
+async fn get_index(test: &State<String>) -> String {
+    format!("Hello, {}", test)
+}
+
+#[launch]
+fn rocket() -> _ {
     setup_logger(log::LevelFilter::Debug).expect("Could not configure the logger");
 
     let config = ProviderConfiguration {
+        mountpoint: Some("/oidc".to_owned()),
         adaptor: Box::new(InMemoryAdaptor::default()),
         jwt_builder: JwtSharedSecret::with_secret("secret"),
     };
 
-    libknockknock::prelude::start(config)
-        .await
-        .map_err(|err| {
-            error!("An error occurred during startup: {:?}", err);
-        })
-        .unwrap();
+    let test = String::from("World");
+
+    rocket::build()
+        .enable_oidc(config)
+        .manage(test)
+        .mount("/", routes![get_index])
 }

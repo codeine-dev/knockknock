@@ -1,10 +1,15 @@
-use crate::{SealedGrantResponses, controllers::{account::{UsernamePasswordForm, }, authorization::ClientAuthBundle}, guards::headers::RequestHost, oidc, prelude::{ResponseType}};
+use crate::{
+    controllers::{account::UsernamePasswordForm, authorization::ClientAuthBundle},
+    guards::headers::RequestHost,
+    oidc,
+    prelude::ResponseType,
+    SealedGrantResponses,
+};
 
 pub type AdaptorResult<T> = std::result::Result<T, ()>;
 
 #[rocket::async_trait]
 pub trait OidcAdaptorImpl {
-
     async fn issue_grant(
         &self,
         sub: &str,
@@ -35,4 +40,3 @@ pub trait OidcAdaptorImpl {
 
     async fn retrieve_grant(&self, code: &str) -> AdaptorResult<SealedGrantResponses>;
 }
-

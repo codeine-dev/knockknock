@@ -9,10 +9,7 @@ pub mod prelude;
 mod traits;
 
 use prelude::{Grant, OidcAdaptor};
-use rocket::{
-    serde::{Deserialize, Serialize},
-    Build, Rocket,
-};
+use rocket::serde::{Deserialize, Serialize};
 use serde_json::json;
 
 pub type ProviderResult<T> = std::result::Result<T, ()>;
@@ -82,28 +79,7 @@ pub struct SealedGrantResponses {
 }
 
 pub struct ProviderConfiguration {
+    pub mountpoint: Option<String>,
     pub jwt_builder: jwt::JwtBuilder,
     pub adaptor: OidcAdaptor,
-}
-
-fn rocket() -> Rocket<Build> {
-    rocket::build()
-}
-
-pub async fn start(config: ProviderConfiguration) -> Result<(), ()> {
-    rocket()
-        .manage(config)
-        .mount(
-            "/",
-            routes![
-                controllers::authorization::authorize,
-                controllers::token::token,
-                controllers::introspect::introspect,
-                controllers::account::sign_in_post,
-                assets::assets
-            ],
-        )
-        .launch()
-        .await
-        .map_err(|_| ())
 }

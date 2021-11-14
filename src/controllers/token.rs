@@ -3,9 +3,9 @@ use std::convert::TryInto;
 use oidc::{TokenRequest, TokenRequestError, TokenRequestResponse};
 use rocket::State;
 
-use crate::{ProviderConfiguration, guards::auth::BasicAuthentication, oidc, prelude::GenericForm};
+use crate::{guards::auth::BasicAuthentication, oidc, prelude::GenericForm, ProviderConfiguration};
 
-#[post("/connect/token", data = "<req>")]
+#[post("/token", data = "<req>")]
 pub async fn token(
     config: &State<ProviderConfiguration>,
     req: GenericForm,

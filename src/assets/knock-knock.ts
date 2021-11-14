@@ -104,7 +104,7 @@ class SignInManager {
     }
 
     private async doChallenge(body: FormData): Promise<void | KnockKnockEventArgs> {
-        let response = await fetch('/sign-in', {
+        let response = await fetch('../sign-in', {
             method: 'POST',
             body,
         });

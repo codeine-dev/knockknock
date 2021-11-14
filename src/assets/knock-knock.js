@@ -71,7 +71,7 @@ class SignInManager {
         return false;
     }
     async doChallenge(body) {
-        let response = await fetch('/sign-in', {
+        let response = await fetch('../sign-in', {
             method: 'POST',
             body,
         });

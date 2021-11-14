@@ -60,7 +60,7 @@ impl TryFrom<HashMap<String, String>> for TokenIntrospectRequest {
     }
 }
 
-#[post("/connect/introspect", data = "<req>")]
+#[post("/introspect", data = "<req>")]
 pub async fn introspect(
     config: &State<ProviderConfiguration>,
     req: GenericForm,

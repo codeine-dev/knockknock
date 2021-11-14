@@ -65,7 +65,7 @@ impl From<&CookieJar<'_>> for ClientAuthBundleOption {
     }
 }
 
-#[get("/connect/authorize?<client_id>&<response_type>&<scope>&<redirect_uri>&<state>&<nonce>")]
+#[get("/authorize?<client_id>&<response_type>&<scope>&<redirect_uri>&<state>&<nonce>")]
 pub async fn authorize(
     client_id: &str,
     response_type: &str,
@@ -108,5 +108,5 @@ pub async fn authorize(
     bundle.save_to_cookies(cookies);
 
     // redirect to the login page OR an error page
-    Redirect::to("/assets/sign-in.html")
+    Redirect::to("assets/sign-in.html")
 }
