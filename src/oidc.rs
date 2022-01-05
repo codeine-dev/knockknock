@@ -268,10 +268,6 @@ impl<'r> Responder<'r, 'static> for TokenRequestResponse {
     }
 }
 
-
-
-
-
 pub fn generate_authorization_code() -> String {
     let mut rng = rand::thread_rng();
     let chars: String = iter::repeat(())

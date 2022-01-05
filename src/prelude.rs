@@ -6,7 +6,7 @@ use crate::{assets, controllers};
 pub use super::{
     controllers::account::UsernamePasswordForm, controllers::authorization::ClientAuthBundle,
     guards::headers::RequestHost, jwt::*, oidc::*, traits::oidc_adaptor::OidcAdaptorImpl,
-    LoginState, ProviderConfiguration, ProviderResult, SealedGrantResponses,
+    LoginState, Mountpoint, ProviderConfiguration, ProviderResult, SealedGrantResponses,
 };
 
 // some types which get re-used a lot
@@ -25,22 +25,20 @@ pub trait KnockKnock {
 
 impl KnockKnock for Rocket<Build> {
     fn enable_oidc(self, config: ProviderConfiguration) -> Self {
-        let base = config
-            .mountpoint
-            .as_ref()
-            .map(|s| s.to_owned())
-            .or_else(|| Some("/connect/".to_owned()))
-            .unwrap();
+        let base = config.mountpoint.get_path();
 
-        self.manage(config).mount(
-            &base,
-            routes![
-                controllers::authorization::authorize,
-                controllers::token::token,
-                controllers::introspect::introspect,
-                controllers::account::sign_in_post,
-                assets::assets
-            ],
-        )
+        self.manage(config)
+            .mount(
+                &base,
+                routes![
+                    controllers::authorization::authorize,
+                    controllers::token::token,
+                    controllers::introspect::introspect,
+                    controllers::account::sign_in_post,
+                    controllers::jwks::get_jwks,
+                    assets::assets
+                ],
+            )
+            .mount("/", routes![controllers::discovery::get_discovery])
     }
 }

@@ -193,7 +193,7 @@ pub async fn sign_in_post(
     }
 
     let auth_code = oidc::generate_authorization_code();
-    let sealed_grant = grants.to_sealed(&config.jwt_builder);
+    let sealed_grant = grants.to_sealed(&config.jwt);
     debug!("Sealed grants: {:?}", sealed_grant);
 
     config
@@ -215,9 +215,7 @@ pub async fn sign_in_post(
         });
     }
 
-    let id_token = grants
-        .id_token
-        .map(|grant| config.jwt_builder.sign(json!(grant)));
+    let id_token = grants.id_token.map(|grant| config.jwt.sign(json!(grant)));
 
     Ok(ValidAuthResult::TokenResult {
         redirect_uri,

@@ -8,7 +8,9 @@ mod oidc;
 pub mod prelude;
 mod traits;
 
-use prelude::{Grant, OidcAdaptor};
+use std::ops::Deref;
+
+use prelude::{Grant, JwtFactory, OidcAdaptor};
 use rocket::serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -45,12 +47,9 @@ impl GrantResponses {
         }
     }
 
-    pub fn from_sealed(
-        sealed: &SealedGrantResponses,
-        signer: &Box<dyn jwt::JwtSign + Sync + Send>,
-    ) -> Result<Self, ()> {
+    pub fn from_sealed(sealed: &SealedGrantResponses, factory: &JwtFactory) -> Result<Self, ()> {
         let access_token: Option<Grant> = sealed.access_token.as_ref().map(|sealed| {
-            signer
+            factory
                 .decode(&sealed)
                 .ok()
                 .map(|v| serde_json::from_value(v).ok().unwrap())
@@ -58,7 +57,7 @@ impl GrantResponses {
         });
 
         let id_token: Option<Grant> = sealed.id_token.as_ref().map(|sealed| {
-            signer
+            factory
                 .decode(&sealed)
                 .ok()
                 .map(|v| serde_json::from_value(v).ok().unwrap())
@@ -78,8 +77,22 @@ pub struct SealedGrantResponses {
     pub id_token: Option<String>,
 }
 
+pub struct Mountpoint(String);
+
+impl Mountpoint {
+    pub fn get_path(&self) -> String {
+        self.0.clone()
+    }
+}
+
+impl Default for Mountpoint {
+    fn default() -> Self {
+        Self("/connect".to_owned())
+    }
+}
+
 pub struct ProviderConfiguration {
-    pub mountpoint: Option<String>,
-    pub jwt_builder: jwt::JwtBuilder,
+    pub mountpoint: Mountpoint,
+    pub jwt: jwt::JwtFactory,
     pub adaptor: OidcAdaptor,
 }

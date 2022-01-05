@@ -5,7 +5,7 @@ use std::{
 
 use libknockknock::prelude::*;
 
-use log::debug;
+use log::{debug, info};
 use rocket::{get, launch, routes, State};
 
 struct InMemoryAdaptor {
@@ -154,10 +154,15 @@ async fn get_index(test: &State<String>) -> String {
 fn rocket() -> _ {
     setup_logger(log::LevelFilter::Debug).expect("Could not configure the logger");
 
+    let jwt = RsaJwtFactory::from_private_pem(include_str!("rsa_private.pem"))
+        .expect("Couldn't build JWT factory");
+
+    let mountpoint = Mountpoint::default();
+
     let config = ProviderConfiguration {
-        mountpoint: Some("/oidc".to_owned()),
+        mountpoint,
         adaptor: Box::new(InMemoryAdaptor::default()),
-        jwt_builder: JwtSharedSecret::with_secret("secret"),
+        jwt: Box::new(jwt),
     };
 
     let test = String::from("World");

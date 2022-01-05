@@ -1,34 +1,52 @@
-use hmac::{Hmac, NewMac};
-use jwt::{SignWithKey, VerifyWithKey};
-use sha2::Sha256;
+use josekit::jwk::alg::rsa::RsaKeyPair;
 
-pub type JwtBuilder = Box<dyn JwtSign + Send + Sync>;
+#[derive(Clone, Debug)]
+pub struct Jwk(pub josekit::jwk::Jwk);
 
-pub struct JwtSharedSecret {
-    key: Hmac<Sha256>,
-}
-
-impl JwtSharedSecret {
-    pub fn with_secret(secret: &str) -> JwtBuilder {
-        Box::new(JwtSharedSecret {
-            key: Hmac::new_from_slice(secret.as_bytes()).unwrap(),
-        })
+impl Jwk {
+    pub fn to_public_key(&self) -> Result<Self, anyhow::Error> {
+        let public_key = self.0.to_public_key()?;
+        Ok(Jwk(public_key))
     }
 }
+
+pub type JwtFactory = Box<dyn JwtSign + Send + Sync>;
 
 pub trait JwtSign {
     fn sign(&self, claims: serde_json::Value) -> String;
     fn decode(&self, token: &str) -> Result<serde_json::Value, ()>;
+    fn get_key(&self) -> Option<Jwk>;
 }
 
-impl JwtSign for JwtSharedSecret {
+pub struct RsaJwtFactory {
+    pem: String,
+    jwk: Jwk,
+}
+
+impl RsaJwtFactory {
+    pub fn from_private_pem(pem: &str) -> Result<Self, anyhow::Error> {
+        let keypair = RsaKeyPair::from_pem(pem)
+            .map_err(|err| anyhow::format_err!("error loading PEM data: {:?}", err))?;
+
+        let jwk = keypair.to_jwk_key_pair();
+
+        Ok(Self {
+            jwk: Jwk(jwk),
+            pem: String::from(pem),
+        })
+    }
+}
+
+impl JwtSign for RsaJwtFactory {
     fn sign(&self, claims: serde_json::Value) -> String {
-        claims
-            .sign_with_key(&self.key)
-            .expect("Error signing claims")
+        todo!()
     }
 
     fn decode(&self, token: &str) -> Result<serde_json::Value, ()> {
-        token.verify_with_key(&self.key).map_err(|_| ())
+        todo!()
+    }
+
+    fn get_key(&self) -> Option<Jwk> {
+        self.jwk.to_public_key().ok()
     }
 }

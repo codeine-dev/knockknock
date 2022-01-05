@@ -77,7 +77,7 @@ pub async fn introspect(
                 .await
                 .map_err(|_| TokenIntrospectError::MissingToken)?;
 
-            let tokens = GrantResponses::from_sealed(&grants, &config.jwt_builder)
+            let tokens = GrantResponses::from_sealed(&grants, &config.jwt)
                 .map_err(|_| TokenIntrospectError::Unauthorized)?;
 
             match tokens.access_token {
