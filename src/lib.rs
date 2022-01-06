@@ -10,8 +10,6 @@ mod traits;
 mod types;
 
 use prelude::*;
-use rocket::serde::{Deserialize, Serialize};
-use serde_json::json;
 
 pub type ProviderResult<T> = std::result::Result<T, ()>;
 
