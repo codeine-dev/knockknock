@@ -12,7 +12,7 @@ impl Jwk {
 
 pub type JwtFactory = Box<dyn JwtSign + Send + Sync>;
 
-impl Clone for Box<dyn JwtSign> {
+impl Clone for JwtFactory {
     fn clone(&self) -> Self {
         self.box_clone()
     }
@@ -22,7 +22,7 @@ pub trait JwtSign {
     fn sign(&self, claims: serde_json::Value) -> String;
     fn decode(&self, token: &str) -> Result<serde_json::Value, ()>;
     fn get_key(&self) -> Option<Jwk>;
-    fn box_clone(&self) -> Box<dyn JwtSign>;
+    fn box_clone(&self) -> JwtFactory;
 }
 
 pub struct RsaJwtFactory {
@@ -57,7 +57,7 @@ impl JwtSign for RsaJwtFactory {
         self.jwk.to_public_key().ok()
     }
 
-    fn box_clone(&self) -> Box<dyn JwtSign> {
+    fn box_clone(&self) -> JwtFactory {
         let clone = Self {
             pem: self.pem.clone(),
             jwk: self.jwk.clone(),
