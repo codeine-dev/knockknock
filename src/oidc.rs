@@ -13,6 +13,8 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use crate::prelude::JwtFactory;
+
 #[derive(PartialEq, Debug, Clone)]
 pub enum ResponseType {
     Code,
@@ -63,6 +65,55 @@ impl Grant {
     }
 }
 
+#[derive(Default, Serialize, Deserialize, Debug)]
+pub struct GrantResponses {
+    pub access_token: Option<Grant>,
+    pub id_token: Option<Grant>,
+}
+
+impl GrantResponses {
+    pub fn to_sealed(&self, signer: &JwtFactory) -> SealedGrantResponses {
+        SealedGrantResponses {
+            access_token: self.access_token.as_ref().map(|t| {
+                debug!("Sealing grant: {:?}", t);
+                signer.sign(json!(t))
+            }),
+            id_token: self.id_token.as_ref().map(|t| {
+                debug!("Sealing grant: {:?}", t);
+                signer.sign(json!(t))
+            }),
+        }
+    }
+
+    pub fn from_sealed(sealed: &SealedGrantResponses, factory: &JwtFactory) -> Result<Self, ()> {
+        let access_token: Option<Grant> = sealed.access_token.as_ref().map(|sealed| {
+            factory
+                .decode(&sealed)
+                .ok()
+                .map(|v| serde_json::from_value(v).ok().unwrap())
+                .unwrap()
+        });
+
+        let id_token: Option<Grant> = sealed.id_token.as_ref().map(|sealed| {
+            factory
+                .decode(&sealed)
+                .ok()
+                .map(|v| serde_json::from_value(v).ok().unwrap())
+                .unwrap()
+        });
+
+        Ok(Self {
+            access_token,
+            id_token,
+        })
+    }
+}
+
+#[derive(Default, Serialize, Deserialize, Debug)]
+pub struct SealedGrantResponses {
+    pub access_token: Option<String>,
+    pub id_token: Option<String>,
+}
 pub struct GrantBuilder {
     issuer: Option<String>,
     subject: Option<String>,
@@ -319,4 +370,15 @@ impl Default for IntrospectResult {
             grant: None,
         }
     }
+}
+
+#[derive(Serialize)]
+pub enum LoginState {
+    Challenge {
+        factor: String,
+        data: serde_json::Value,
+    },
+    Success {
+        redirect: String,
+    },
 }
