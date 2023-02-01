@@ -1,3 +1,4 @@
+use josekit::jwt::JwtPayload;
 use rand::{distributions::Alphanumeric, Rng};
 use rocket::{
     http::{ContentType, Status},
@@ -65,6 +66,21 @@ impl Grant {
     }
 }
 
+impl Into<JwtPayload> for &Grant {
+    fn into(self) -> JwtPayload {
+        let mut payload = JwtPayload::new();
+        
+
+        payload
+    }
+}
+
+impl From<&JwtPayload> for Grant {
+    fn from(value: &JwtPayload) -> Self {
+        todo!()
+    }
+}
+
 #[derive(Default, Serialize, Deserialize, Debug)]
 pub struct GrantResponses {
     pub access_token: Option<Grant>,
@@ -72,33 +88,39 @@ pub struct GrantResponses {
 }
 
 impl GrantResponses {
-    pub fn to_sealed(&self, signer: &JwtFactory) -> SealedGrantResponses {
-        SealedGrantResponses {
-            access_token: self.access_token.as_ref().map(|t| {
-                debug!("Sealing grant: {:?}", t);
-                signer.sign(json!(t))
-            }),
-            id_token: self.id_token.as_ref().map(|t| {
-                debug!("Sealing grant: {:?}", t);
-                signer.sign(json!(t))
-            }),
-        }
+    pub fn to_sealed(&self, signer: &JwtFactory) -> Result<SealedGrantResponses, anyhow::Error> {
+        debug!("Sealing grant: {:?}", self);
+
+        let sign_payload = |t: &Grant| {
+            debug!("Sealing grant access_token: {:?}", t);
+            debug!("Token: {}", json!(t));
+            let payload: JwtPayload = t.into();
+            signer.sign(&payload)
+        };
+        
+        let access_token = self.access_token.as_ref().map(sign_payload).transpose()?;
+        let id_token = self.id_token.as_ref().map(sign_payload).transpose()?;
+        
+        Ok(SealedGrantResponses {
+            access_token,
+            id_token,
+        })
     }
 
     pub fn from_sealed(sealed: &SealedGrantResponses, factory: &JwtFactory) -> Result<Self, ()> {
         let access_token: Option<Grant> = sealed.access_token.as_ref().map(|sealed| {
             factory
-                .decode(&sealed)
+                .verify(&sealed)
                 .ok()
-                .map(|v| serde_json::from_value(v).ok().unwrap())
+                .map(|v| Grant::from(&v))
                 .unwrap()
         });
 
         let id_token: Option<Grant> = sealed.id_token.as_ref().map(|sealed| {
             factory
-                .decode(&sealed)
+                .verify(&sealed)
                 .ok()
-                .map(|v| serde_json::from_value(v).ok().unwrap())
+                .map(|v| Grant::from(&v))
                 .unwrap()
         });
 
@@ -114,6 +136,7 @@ pub struct SealedGrantResponses {
     pub access_token: Option<String>,
     pub id_token: Option<String>,
 }
+
 pub struct GrantBuilder {
     issuer: Option<String>,
     subject: Option<String>,
@@ -319,7 +342,7 @@ impl<'r> Responder<'r, 'static> for TokenRequestResponse {
     }
 }
 
-pub fn generate_authorization_code() -> String {
+pub fn generate_code() -> String {
     let mut rng = rand::thread_rng();
     let chars: String = iter::repeat(())
         .map(|()| rng.sample(Alphanumeric))

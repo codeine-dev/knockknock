@@ -5,7 +5,7 @@ use std::{
 
 use libknockknock::prelude::*;
 
-use log::{debug, info};
+use log::{debug};
 use rocket::{get, launch, routes, State};
 
 struct InMemoryAdaptor {

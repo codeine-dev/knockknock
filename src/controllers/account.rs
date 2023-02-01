@@ -1,3 +1,4 @@
+use josekit::jwt::JwtPayload;
 use rocket::http::{ContentType, Status};
 use rocket::serde::{Deserialize, Serialize};
 use rocket::{form::Form, http::CookieJar, response::Responder, State};
@@ -146,11 +147,9 @@ pub async fn sign_in_post(
     // ensure we have either a token OR id_token response type requested
     if !response_types
         .iter()
-        .any(|rt| rt == &ResponseType::IdToken || rt == &ResponseType::Token)
+        .any(|rt| rt == &ResponseType::Code)
     {
-        return Err(AuthError::InvalidRequest(
-            "Must specify either token or id_token responses when authorizing".to_owned(),
-        ));
+        // TODO: Behave differently here if we want a code?
     };
 
     let mut grants = GrantResponses::default();
@@ -188,12 +187,14 @@ pub async fn sign_in_post(
             ResponseType::IdToken => {
                 grants.id_token = Some(grant);
             }
-            _ => {}
+            ResponseType::Code => {
+                grants.access_token = Some(grant);
+            }
         }
     }
 
-    let auth_code = oidc::generate_authorization_code();
-    let sealed_grant = grants.to_sealed(&config.jwt);
+    let auth_code = oidc::generate_code();
+    let sealed_grant = grants.to_sealed(&config.jwt).map_err(|_| AuthError::InvalidRequest("Couldn't verify token".to_owned()))?;
     debug!("Sealed grants: {:?}", sealed_grant);
 
     config
@@ -215,7 +216,10 @@ pub async fn sign_in_post(
         });
     }
 
-    let id_token = grants.id_token.map(|grant| config.jwt.sign(json!(grant)));
+    let id_token = grants.id_token.map(|grant| {
+        let payload: JwtPayload = (&grant).into();
+        config.jwt.sign(&payload).map_err(|_| AuthError::InvalidRequest("Unable to seal id_token".to_owned()))
+    }).transpose()?;
 
     Ok(ValidAuthResult::TokenResult {
         redirect_uri,

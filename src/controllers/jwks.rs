@@ -28,7 +28,7 @@ impl Jwks {
 
 #[get("/jwks")]
 pub fn get_jwks(config: &State<ProviderConfiguration>) -> Json<Jwks> {
-    if let Some(key) = config.jwt.get_key() {
+    if let Some(key) = config.jwt.get_public_key() {
         return Json(Jwks::with_key(key));
     }
 
