@@ -1,9 +1,7 @@
-use josekit::jwt::JwtPayload;
 use rocket::http::{ContentType, Status};
 use rocket::serde::{Deserialize, Serialize};
 use rocket::{form::Form, http::CookieJar, response::Responder, State};
 use rocket::{Request, Response};
-use serde_json::json;
 
 use crate::prelude::ResponseType;
 use crate::{
@@ -22,6 +20,8 @@ pub enum ValidAuthResult {
         state: Option<String>,
         #[serde(skip_serializing)]
         code: String,
+        #[serde(skip_serializing)]
+        id_token: Option<String>,
     },
     TokenResult {
         redirect_uri: String,
@@ -61,6 +61,7 @@ impl<'r> Responder<'r, 'static> for ValidAuthResult {
                 redirect_uri,
                 state,
                 code,
+                id_token,
             } => {
                 let parts: Vec<String> = [("code", Some(code)), ("state", state)]
                     .iter()
@@ -203,7 +204,8 @@ pub async fn sign_in_post(
         .await
         .map_err(|_| AuthError::Unauthorized("Could not store the grant".to_owned()))?;
 
-    let access_token = Some(String::from(&auth_code));
+    let access_token = sealed_grant.access_token;
+    let id_token = sealed_grant.id_token;
 
     let redirect_uri = bundle.redirect_uri.to_owned();
     let state = bundle.state.to_owned();
@@ -212,14 +214,13 @@ pub async fn sign_in_post(
         return Ok(ValidAuthResult::AuthCodeResult {
             redirect_uri,
             state,
-            code: access_token.unwrap(),
+            code: auth_code,
+            id_token: match response_types.contains(&ResponseType::Token) {
+                true => id_token,
+                _ => None,
+            },
         });
     }
-
-    let id_token = grants.id_token.map(|grant| {
-        let payload: JwtPayload = (&grant).into();
-        config.jwt.sign(&payload).map_err(|_| AuthError::InvalidRequest("Unable to seal id_token".to_owned()))
-    }).transpose()?;
 
     Ok(ValidAuthResult::TokenResult {
         redirect_uri,

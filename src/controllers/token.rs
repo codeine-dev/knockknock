@@ -25,17 +25,47 @@ pub async fn token(
                 .retrieve_grant(&code)
                 .await
                 .map_err(|_| TokenRequestError::InvalidCode(code))?;
+
             Some(grants)
         }
         _ => None,
     };
 
     match grants {
-        Some(grants) => Ok(TokenRequestResponse {
-            access_token: grants.access_token,
-            id_token: grants.id_token,
-            refresh_token: None,
-        }),
+        Some(grants) => {
+            grants
+                .access_token
+                .clone()
+                .map(|t| {
+                    config
+                        .jwt
+                        .verify(&t)
+                        .map_err(|err| {
+                            warn!("access_token is invalid: {:?}", err);
+                            TokenRequestError::Unauthorized
+                        })
+                })
+                .transpose()?;
+            grants
+                .id_token
+                .clone()
+                .map(|t| {
+                    config
+                        .jwt
+                        .verify(&t)
+                        .map_err(|err| {
+                            warn!("id_token is invalid: {:?}", err);
+                            TokenRequestError::Unauthorized
+                        })
+                })
+                .transpose()?;
+
+            Ok(TokenRequestResponse {
+                access_token: grants.access_token,
+                id_token: grants.id_token,
+                refresh_token: None,
+            })
+        }
         None => Err(TokenRequestError::Unauthorized),
     }
 }

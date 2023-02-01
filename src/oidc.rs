@@ -1,4 +1,3 @@
-use josekit::jwt::JwtPayload;
 use rand::{distributions::Alphanumeric, Rng};
 use rocket::{
     http::{ContentType, Status},
@@ -66,21 +65,6 @@ impl Grant {
     }
 }
 
-impl Into<JwtPayload> for &Grant {
-    fn into(self) -> JwtPayload {
-        let mut payload = JwtPayload::new();
-        
-
-        payload
-    }
-}
-
-impl From<&JwtPayload> for Grant {
-    fn from(value: &JwtPayload) -> Self {
-        todo!()
-    }
-}
-
 #[derive(Default, Serialize, Deserialize, Debug)]
 pub struct GrantResponses {
     pub access_token: Option<Grant>,
@@ -94,8 +78,8 @@ impl GrantResponses {
         let sign_payload = |t: &Grant| {
             debug!("Sealing grant access_token: {:?}", t);
             debug!("Token: {}", json!(t));
-            let payload: JwtPayload = t.into();
-            signer.sign(&payload)
+            // let payload: JwtPayload = t.into();
+            signer.sign(t)
         };
         
         let access_token = self.access_token.as_ref().map(sign_payload).transpose()?;
@@ -107,22 +91,16 @@ impl GrantResponses {
         })
     }
 
-    pub fn from_sealed(sealed: &SealedGrantResponses, factory: &JwtFactory) -> Result<Self, ()> {
-        let access_token: Option<Grant> = sealed.access_token.as_ref().map(|sealed| {
+    pub fn from_sealed(sealed: &SealedGrantResponses, factory: &JwtFactory) -> Result<Self, anyhow::Error> {
+        let access_token = sealed.access_token.as_ref().map(|sealed| {
             factory
                 .verify(&sealed)
-                .ok()
-                .map(|v| Grant::from(&v))
-                .unwrap()
-        });
+        }).transpose()?;
 
-        let id_token: Option<Grant> = sealed.id_token.as_ref().map(|sealed| {
+        let id_token = sealed.id_token.as_ref().map(|sealed| {
             factory
                 .verify(&sealed)
-                .ok()
-                .map(|v| Grant::from(&v))
-                .unwrap()
-        });
+        }).transpose()?;
 
         Ok(Self {
             access_token,
@@ -326,8 +304,11 @@ impl<'r> Responder<'r, 'static> for TokenRequestError {
 
 #[derive(Debug, Serialize, Default)]
 pub struct TokenRequestResponse {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub access_token: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub refresh_token: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub id_token: Option<String>,
 }
 

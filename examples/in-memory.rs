@@ -55,7 +55,7 @@ impl OidcAdaptorImpl for InMemoryAdaptor {
             .with_claim("Admin", "")
             .with_claim("email", "richbayliss@gmail.com")
             .with_scope(&scopes.join(" "))
-            .expires_in_secs(10);
+            .expires_in_secs(30);
 
         match response_type {
             ResponseType::IdToken => {
